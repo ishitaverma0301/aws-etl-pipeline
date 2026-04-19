@@ -155,33 +155,19 @@ skyledger/
 
 ### Deployment
 
-**Prerequisites**
+**Pre-requisites**
 - AWS account with access to Glue, S3, Step Functions, SSM, and SNS
-- Python 3.9+ / PySpark 3.x (provided by the AWS Glue 4.0 runtime)
+- Python 3.10 / PySpark 3.3 (provided by the AWS Glue 4.0 runtime)
 
-**Deploy the stack**
-
+**1. Deploy the infrastructure stack**
 ```bash
 aws cloudformation deploy \
   --template-file infrastructure/cloudformation.yaml \
-  --stack-name flight-data-pipeline \
+  --stack-name flight-data-pipeline-dev \
   --parameter-overrides \
       Environment=dev \
       AlertEmail=you@example.com \
   --capabilities CAPABILITY_NAMED_IAM
-```
-
-This provisions all S3 buckets, Glue jobs, the Step Functions state machine, SSM parameters, SNS topic, and IAM roles.
-
-**Upload Gold SQL artifacts**
-
-```bash
-aws s3 sync sql/gold/ \
-    "s3://$(aws ssm get-parameter --name /ishita-project1/buckets/artifacts \
-           --query 'Parameter.Value' --output text)/sql/gold/" \
-    --delete --exclude "*" --include "*.sql"
-```
-
 **Trigger a run**
 
 ```bash
