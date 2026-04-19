@@ -153,9 +153,8 @@ skyledger/
 ```
 ---
 
-```bash
 ### Deployment
-
+```bash
 **Pre-requisites**
 - AWS account with access to Glue, S3, Step Functions, SSM, and SNS
 - Python 3.10 / PySpark 3.3 (provided by the AWS Glue 4.0 runtime)
