@@ -1,0 +1,376 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  US Flight Data Pipeline — Full Infrastructure Stack
+  Deploys S3 buckets (Bronze/Silver/Gold/Artifacts), Glue jobs,
+  Step Functions state machine, SSM parameters, SNS alerting, and IAM roles.
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARAMETERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment
+
+  ProjectName:
+    Type: String
+    Default: ishita-project1
+    Description: Project identifier used in resource naming
+
+  AlertEmail:
+    Type: String
+    Description: Email address for pipeline alert notifications
+
+  Baseline:
+    Type: String
+    Default: '2025-06'
+    Description: Initial watermark (YYYY-MM) for first pipeline run
+
+  BtsBaseUrl:
+    Type: String
+    Default: 'https://transtats.bts.gov/PREZIP'
+    Description: BTS data download base URL
+
+  FilePrefix:
+    Type: String
+    Default: 'On_Time_Reporting_Carrier_On_Time_Performance_1987_present'
+    Description: BTS ZIP file name prefix
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESOURCES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+Resources:
+
+  # ─── S3 Buckets ─────────────────────────────────────────────────────────────
+
+  BronzeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-bronze-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: bronze
+
+  SilverBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-silver-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: silver
+
+  GoldBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-gold-${Environment}-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: gold
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-artifacts-${Environment}-${AWS::AccountId}'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: artifacts
+
+  # ─── SNS Topic ──────────────────────────────────────────────────────────────
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-pipeline-alerts-${Environment}'
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ─── SSM Parameters ────────────────────────────────────────────────────────
+
+  SSMBronzeBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/buckets/bronze'
+      Type: String
+      Value: !Ref BronzeBucket
+
+  SSMSilverBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/buckets/silver'
+      Type: String
+      Value: !Ref SilverBucket
+
+  SSMGoldBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/buckets/gold'
+      Type: String
+      Value: !Ref GoldBucket
+
+  SSMArtifactsBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/buckets/artifacts'
+      Type: String
+      Value: !Ref ArtifactsBucket
+
+  SSMBtsBaseUrl:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/api/bts_base_url'
+      Type: String
+      Value: !Ref BtsBaseUrl
+
+  SSMFilePrefix:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/api/file_prefix'
+      Type: String
+      Value: !Ref FilePrefix
+
+  SSMSqlPrefix:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/api/sql_prefix'
+      Type: String
+      Value: 'sql/gold/'
+
+  SSMSnsTopicArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/sns/alert_topic_arn'
+      Type: String
+      Value: !Ref AlertTopic
+
+  SSMBaseline:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/state/baseline'
+      Type: String
+      Value: !Ref Baseline
+
+  SSMChunkSize:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/tuning/chunk_size_bytes'
+      Type: String
+      Value: '1048576'
+
+  SSMMinFileSize:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/tuning/min_file_size_bytes'
+      Type: String
+      Value: '1024'
+
+  SSMHttpTimeout:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${ProjectName}/tuning/http_timeout_sec'
+      Type: String
+      Value: '300'
+
+  # ─── IAM Role for Glue ─────────────────────────────────────────────────────
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-glue-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: PipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BronzeBucket}/*'
+                  - !Sub 'arn:aws:s3:::${BronzeBucket}'
+                  - !Sub 'arn:aws:s3:::${SilverBucket}/*'
+                  - !Sub 'arn:aws:s3:::${SilverBucket}'
+                  - !Sub 'arn:aws:s3:::${GoldBucket}/*'
+                  - !Sub 'arn:aws:s3:::${GoldBucket}'
+                  - !Sub 'arn:aws:s3:::${ArtifactsBucket}/*'
+                  - !Sub 'arn:aws:s3:::${ArtifactsBucket}'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref AlertTopic
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # ─── Glue Jobs ──────────────────────────────────────────────────────────────
+
+  IngestionJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub '${ProjectName}-ingestion'
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: pythonshell
+        PythonVersion: '3.9'
+        ScriptLocation: !Sub 's3://${ArtifactsBucket}/glue_scripts/ingestion.py'
+      DefaultArguments:
+        '--TempDir': !Sub 's3://${ArtifactsBucket}/glue_temp/'
+        '--job-language': python
+      MaxRetries: 0
+      Timeout: 120
+      GlueVersion: '3.0'
+      MaxCapacity: 1
+
+  DQCheckJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub '${ProjectName}-dqcheck'
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: glueetl
+        PythonVersion: '3'
+        ScriptLocation: !Sub 's3://${ArtifactsBucket}/glue_scripts/dq_check.py'
+      DefaultArguments:
+        '--TempDir': !Sub 's3://${ArtifactsBucket}/glue_temp/'
+        '--job-language': python
+        '--enable-metrics': 'true'
+      MaxRetries: 0
+      Timeout: 120
+      GlueVersion: '4.0'
+      WorkerType: G.1X
+      NumberOfWorkers: 5
+
+  TransformationJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: !Sub '${ProjectName}-transformation'
+      Role: !GetAtt GlueJobRole.Arn
+      Command:
+        Name: glueetl
+        PythonVersion: '3'
+        ScriptLocation: !Sub 's3://${ArtifactsBucket}/glue_scripts/transformation.py'
+      DefaultArguments:
+        '--TempDir': !Sub 's3://${ArtifactsBucket}/glue_temp/'
+        '--job-language': python
+        '--enable-metrics': 'true'
+      MaxRetries: 0
+      Timeout: 180
+      GlueVersion: '4.0'
+      WorkerType: G.1X
+      NumberOfWorkers: 10
+
+  # ─── IAM Role for Step Functions ────────────────────────────────────────────
+
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-sfn-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GlueJobExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                  - glue:GetJobRuns
+                  - glue:BatchStopJobRun
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:job/${ProjectName}-*'
+
+  # ─── Step Functions State Machine ───────────────────────────────────────────
+
+  PipelineStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${ProjectName}-pipeline-${Environment}'
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      DefinitionS3Location:
+        Bucket: !Ref ArtifactsBucket
+        Key: orchestration/step_function.json
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OUTPUTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+Outputs:
+  BronzeBucketName:
+    Value: !Ref BronzeBucket
+    Description: Bronze layer S3 bucket
+
+  SilverBucketName:
+    Value: !Ref SilverBucket
+    Description: Silver layer S3 bucket
+
+  GoldBucketName:
+    Value: !Ref GoldBucket
+    Description: Gold layer S3 bucket
+
+  StateMachineArn:
+    Value: !Ref PipelineStateMachine
+    Description: Step Functions state machine ARN
+
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+    Description: SNS topic for pipeline alerts
+
+  GlueRoleArn:
+    Value: !GetAtt GlueJobRole.Arn
+    Description: IAM role used by Glue jobs

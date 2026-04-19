@@ -1,0 +1,201 @@
+{
+  "Comment": "Flight Data Pipeline: Bronze -> Silver -> Gold. Runs incremental by default (empty input or {}). Pass reprocess=true with start_date/end_date for full reload.",
+  "StartAt": "Check-Mode",
+  "States": {
+    "Check-Mode": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.reprocess",
+              "IsPresent": true
+            },
+            {
+              "Variable": "$.reprocess",
+              "StringEquals": "true"
+            }
+          ],
+          "Next": "Bronze-Ingestion-Reprocess"
+        }
+      ],
+      "Default": "Bronze-Ingestion-Incremental"
+    },
+
+    "Bronze-Ingestion-Incremental": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "ishita-project1-ingestion",
+        "Arguments": {
+          "--reprocess": "false"
+        }
+      },
+      "ResultPath": "$.BronzeResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "Silver-DQ-Incremental",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.ErrorInfo",
+          "Next": "Pipeline-Failed"
+        }
+      ]
+    },
+    "Silver-DQ-Incremental": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "ishita-project1-dqcheck",
+        "Arguments": {
+          "--reprocess": "false"
+        }
+      },
+      "ResultPath": "$.SilverResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "Gold-Transformation-Incremental",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.ErrorInfo",
+          "Next": "Pipeline-Failed"
+        }
+      ]
+    },
+    "Gold-Transformation-Incremental": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "ishita-project1-transformation",
+        "Arguments": {
+          "--reprocess": "false"
+        }
+      },
+      "ResultPath": "$.GoldResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.ErrorInfo",
+          "Next": "Pipeline-Failed"
+        }
+      ]
+    },
+
+    "Bronze-Ingestion-Reprocess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "ishita-project1-ingestion",
+        "Arguments": {
+          "--reprocess": "true",
+          "--start_date.$": "$.start_date",
+          "--end_date.$": "$.end_date"
+        }
+      },
+      "ResultPath": "$.BronzeResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "Silver-DQ-Reprocess",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.ErrorInfo",
+          "Next": "Pipeline-Failed"
+        }
+      ]
+    },
+    "Silver-DQ-Reprocess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "ishita-project1-dqcheck",
+        "Arguments": {
+          "--reprocess": "true",
+          "--start_date.$": "$.start_date",
+          "--end_date.$": "$.end_date"
+        }
+      },
+      "ResultPath": "$.SilverResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "Gold-Transformation-Reprocess",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.ErrorInfo",
+          "Next": "Pipeline-Failed"
+        }
+      ]
+    },
+    "Gold-Transformation-Reprocess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "ishita-project1-transformation",
+        "Arguments": {
+          "--reprocess": "true",
+          "--start_date.$": "$.start_date",
+          "--end_date.$": "$.end_date"
+        }
+      },
+      "ResultPath": "$.GoldResult",
+      "Retry": [
+        {
+          "ErrorEquals": ["Glue.ConcurrentRunsExceededException"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.ErrorInfo",
+          "Next": "Pipeline-Failed"
+        }
+      ]
+    },
+
+    "Pipeline-Failed": {
+      "Type": "Fail",
+      "Error": "PipelineFailure",
+      "Cause": "One of the Glue jobs failed. Check CloudWatch logs for details."
+    }
+  }
+}
