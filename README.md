@@ -169,6 +169,7 @@ aws cloudformation deploy \
       Environment=dev \
       AlertEmail=you@example.com \
   --capabilities CAPABILITY_NAMED_IAM
+```
 
 This provisions all S3 buckets, Glue jobs, the Step Functions state machine, SSM parameters, SNS topic, and IAM roles.
 
