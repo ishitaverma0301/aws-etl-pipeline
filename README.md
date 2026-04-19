@@ -150,7 +150,7 @@ skyledger/
 │   └── statemachine.svg              # Step Functions execution flow diagram
 ├── data-quality-rules.md             # Catalog of the 16 DQ checks with thresholds
 └── pipeline-operations.md            # Runbook: modes, watermarks, failure handling
-
+```
 ---
 
 ```bash
