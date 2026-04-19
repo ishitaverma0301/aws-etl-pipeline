@@ -23,7 +23,7 @@ A production-grade, serverless ETL pipeline that ingests, validates, and transfo
 - **Resilient watermarks** — Bronze uses a Leapfrog watermark that advances to the highest successful month, while Silver strictly enforces a contiguous high-water mark. Gaps are tracked via durable state markers (`_FAILED`, `_PROCESSED`) in S3.
 - **Single-pass PySpark DQ engine** — 16 data-quality rules plus deduplication applied in one Spark SQL pass for minimum shuffle cost.
 - **Year-grain Gold idempotency** — each Gold year stores its last-seen Silver month in the `_PROCESSED` marker body; re-running is a cheap skip unless new Silver months have arrived, in which case the full year is atomically rewritten.
-- **Externalized SQL artifacts** — Gold aggregation logic lives in versioned [`.sql` files](sql/gold) loaded from S3 at runtime, so analysts can ship query changes without redeploying the Glue job. See [`sql/README.md`](sql/README.md) for the runtime contract and deployment flow.
+- **Externalized SQL artifacts** — Gold aggregation logic lives in versioned [`.sql` files](sql/gold) loaded from S3 at runtime, so analysts can ship query changes without redeploying the Glue job.
 - **Atomic writes via temp-staging** — no partial or corrupt outputs are ever visible to downstream consumers.
 - **Full Infrastructure-as-Code** — the entire stack (S3, Glue, Step Functions, SSM, SNS, IAM) deploys from a single CloudFormation template.
 - **Structured SNS alerting** — every run emits an email summary with per-month breakdown, rejection stats, and watermark deltas.
