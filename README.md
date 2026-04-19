@@ -153,6 +153,7 @@ skyledger/
 
 ---
 
+```bash
 ### Deployment
 
 **Pre-requisites**
@@ -168,18 +169,19 @@ aws cloudformation deploy \
       Environment=dev \
       AlertEmail=you@example.com \
   --capabilities CAPABILITY_NAMED_IAM
-**Trigger a run**
+```
+
+**2. Upload ETL Scripts and SQL Artifacts**
 
 ```bash
-# Incremental run (default)
-aws stepfunctions start-execution \
-  --state-machine-arn <ARN> \
-  --input '{}'
+# Retrieve the dynamically provisioned bucket name
+ARTIFACT_BUCKET=$(aws ssm get-parameter --name /flight-data-pipeline/dev/buckets/artifacts --query 'Parameter.Value' --output text)
 
-# Targeted reprocess of specific months
-aws stepfunctions start-execution \
-  --state-machine-arn <ARN> \
-  --input '{"reprocess":"true","start_date":"2024-01","end_date":"2024-06"}'
+# Upload PySpark scripts (Required before running Glue Jobs)
+aws s3 sync src/pyspark/ "s3://${ARTIFACT_BUCKET}/scripts/" --delete --exclude "*" --include "*.py"
+
+# Upload Gold SQL artifacts
+aws s3 sync sql/gold/ "s3://${ARTIFACT_BUCKET}/sql/gold/" --delete --exclude "*" --include "*.sql"
 ```
 
 ---
